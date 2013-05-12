@@ -9,6 +9,7 @@ package main
 #define FDB_API_VERSION 21
 #include <foundationdb/fdb_c.h>
 
+extern void GoCallback(void* chanPointer);
 
 // TODO -- clean these up (or get rid of them)
 uint8_t* convert(char* test) {
@@ -18,10 +19,20 @@ uint8_t* convert(char* test) {
 char* convert2(uint8_t* test) {
 	return (char*)(test);
 }
+
+void callbackHelper(FDBFuture* f, void* chanPointer) {
+	fdb_future_set_callback(f, (FDBCallback)GoCallback, chanPointer);
+}
+
 */
 import "C"
 
 import "fmt"
+import "unsafe"
+
+//func futureGoroutine(f, *C.FDBFuture, c chan bool) {
+//
+//}
 
 func main() {
 	C.fdb_select_api_version_impl(C.FDB_API_VERSION, C.FDB_API_VERSION)
@@ -33,14 +44,21 @@ func main() {
 
 	/* == Cluster == */
 	clusterFuture := C.fdb_create_cluster(C.CString("/etc/foundationdb/fdb.cluster"))
-	C.fdb_future_block_until_ready(clusterFuture)
+
+	clusterFutureChan := make(chan bool, 1)
+	C.callbackHelper(clusterFuture, unsafe.Pointer(&clusterFutureChan))
+	<-clusterFutureChan
+
 	var cluster *C.FDBCluster
 	C.fdb_future_get_cluster(clusterFuture, &cluster)
 	C.fdb_future_destroy(clusterFuture)
 
 	/* == Database == */
 	dbFuture := C.fdb_cluster_create_database(cluster, C.convert(C.CString("DB")), (C.int)(C.strlen(C.CString("DB"))))
-	C.fdb_future_block_until_ready(dbFuture)
+
+	dbFutureChan := make(chan bool, 1)
+	C.callbackHelper(dbFuture, unsafe.Pointer(&dbFutureChan))
+	<-dbFutureChan
 
 	var db *C.FDBDatabase
 	C.fdb_future_get_database(dbFuture, &db)
@@ -53,8 +71,9 @@ func main() {
 
 	getFuture := C.fdb_transaction_get(tr, C.convert(C.CString("TestKey")), (C.int)(C.strlen(C.CString("TestKey"))), 0)
 
-	C.fdb_future_is_error(getFuture)
-	C.fdb_future_block_until_ready(getFuture)
+	getFutureChan := make(chan bool, 1)
+	C.callbackHelper(getFuture, unsafe.Pointer(&getFutureChan))
+	<-getFutureChan
 
 	var valuePresent C.fdb_bool_t
 	var value *C.uint8_t
